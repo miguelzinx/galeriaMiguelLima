@@ -1,46 +1,49 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
+import AddButton from "@/components/AddButton";
+import DeleteButton from "@/components/DeleteButton";
+import SaveButton from "@/components/SaveButton";
+import { sendFileToSupabase } from "@/composeable/supabase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Picker } from "@react-native-picker/picker";
+import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
-import { Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { FlatList, Image, StyleSheet, Text, View } from "react-native";
 
 export default function Index() {
-  const STORAGE_NAME = 'galeria';
-  const STORAGE_AVATAR = 'avatar';
-  const [image, setImage] = useState<string | null>(null);
-  const [listaFotos, setListaFotos] = useState<Array<string>>([]);
-  const [avatar, setAvatar] = useState<string | null>(null);
+  const STORAGE_NAME = "galeria";
 
-  // salvar imagem
-  const storeImage = async (value: string) => {
+  const [image, setImage] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string>('');
+  const [contentType, setContentType] = useState<string>('');
+  const [fileSize, setFileSize] = useState<Number>(0);
+  const [base64, setBase64] = useState<string>('');
+  const [listaFotos, setListaFotos] = useState<Array<string>>([]);
+  const [numColumns, setNumColumns] = useState<number>(2);
+
+  const storeImage = async (path: string, name: string, contentType: string, base64: string, fileSize: Number) => {
     try {
-      const fotos = [...listaFotos, value];
-      setListaFotos(fotos);
-      await AsyncStorage.setItem(STORAGE_NAME, JSON.stringify(fotos));
-      setImage(null);
-      Alert.alert("Imagem salva!");
+      await sendFileToSupabase({
+        file: base64,
+        path: path,
+        name: name,
+        contentType: contentType,
+        fileSize: fileSize
+      })
     } catch (error) {
-      console.error("Erro ao salvar");
+      console.error("❌ Erro ao salvar");
     }
   };
 
-  // buscar imagens
   const getImage = async () => {
     try {
       const value = await AsyncStorage.getItem(STORAGE_NAME);
       if (value !== null) {
         setListaFotos(JSON.parse(value));
       }
-
-      const avatarValue = await AsyncStorage.getItem(STORAGE_AVATAR);
-      if (avatarValue !== null) {
-        setAvatar(avatarValue);
-      }
     } catch (error) {
-      console.error("Erro ao buscar");
+      console.error("❌ Erro ao carregar");
     }
   };
 
-  // remover imagem
   const removeImage = async (indice: number) => {
     try {
       const lista = [...listaFotos];
@@ -53,7 +56,7 @@ export default function Index() {
         setListaFotos([]);
       }
     } catch (error) {
-      console.error("Erro ao apagar");
+      console.error("❌ Erro ao apagar");
     }
   };
 
@@ -61,79 +64,80 @@ export default function Index() {
     getImage();
   }, []);
 
-  // adicionar foto da galeria
   const addFoto = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 1,
+      base64: true,
     });
+
     if (!result.canceled) {
       setImage(result.assets[0].uri);
+      setFileSize(result.assets[0].fileSize);
+      setBase64(result.assets[0]?.base64 ?? null)
     }
   };
 
-  // escolher foto de perfil
-  const escolherAvatar = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
-    });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setAvatar(uri);
-      await AsyncStorage.setItem(STORAGE_AVATAR, uri);
+  const convertBytesToHuman = (size: Number | undefined) => {
+    if (size == undefined) {
+      return "";
     }
+
+    const kb = Number(size) / 1024;
+    const mb = kb / 1024;
+
+    if (mb > 1) {
+      return `${mb.toFixed(2)} Mb`;
+    }
+
+    return `${kb.toFixed(2)} Kb`;
   };
+
+  const renderItem = ({ item, index }: { item: string; index: number }) => (
+    <View style={styles.card}>
+      <Image source={{ uri: item }} style={styles.image} />
+      <DeleteButton onPress={() => removeImage(index)} />
+    </View>
+  );
 
   return (
     <View style={styles.container}>
-      {/* --- Cabeçalho com avatar --- */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={escolherAvatar}>
-          <Image
-            source={{ uri: avatar || "https://i.pravatar.cc/150?img=12" }}
-            style={styles.profilePic}
-          />
-        </TouchableOpacity>
-        <Text style={styles.username}>Miguel Lima</Text>
-      </View>
+      <Text style={styles.title}>Galeria</Text>
 
-      {/* --- Botões de ação --- */}
-      <View style={styles.buttonsRow}>
-        {/* Botão de adicionar */}
-        <TouchableOpacity style={styles.addBtn} onPress={addFoto}>
-          <Text style={styles.addIcon}>＋</Text>
-        </TouchableOpacity>
+      <AddButton onPress={addFoto} />
+      {image && <Image source={{ uri: image }} style={styles.preview} />}
+      {image && <Text style={styles.fileSize}>{convertBytesToHuman(fileSize)}</Text>}
+      {image && <SaveButton onPress={() => storeImage(image, base64)} />}
 
-        {/* Botão de salvar */}
-        {image && (
-          <TouchableOpacity style={styles.saveBtn} onPress={() => storeImage(image)}>
-            <Text style={styles.saveText}>Salvar</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {listaFotos.length > 0 && (
+        <>
+          <Text style={styles.subtitle}>🖼️ Fotos Salvas</Text>
 
-      {/* --- Galeria estilo grid --- */}
-      <FlatList
-        data={listaFotos}
-        keyExtractor={(item, index) => index.toString()}
-        numColumns={3}
-        renderItem={({ item, index }) => (
-          <View style={styles.gridItem}>
-            <Image source={{ uri: item }} style={styles.imageGrid} />
-            <TouchableOpacity
-              style={styles.deleteBtn}
-              onPress={() => removeImage(index)}
+          {/* Picker para mudar a quantidade de colunas */}
+          <View style={styles.pickerBox}>
+            <Text style={styles.pickerLabel}>Layout:</Text>
+            <Picker
+              selectedValue={numColumns}
+              style={styles.picker}
+              onValueChange={(val) => setNumColumns(val)}
             >
-              <Text style={{ color: "white", fontSize: 12 }}>X</Text>
-            </TouchableOpacity>
+              <Picker.Item label="1 x 1" value={1} />
+              <Picker.Item label="2 x 2" value={2} />
+            </Picker>
           </View>
-        )}
-      />
+
+          <FlatList
+            data={listaFotos}
+            renderItem={renderItem}
+            keyExtractor={(_, index) => index.toString()}
+            numColumns={numColumns}
+            key={numColumns}
+            contentContainerStyle={styles.grid}
+          />
+        </>
+      )}
     </View>
   );
 }
@@ -141,76 +145,76 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000", // estilo dark do Instagram
+    padding: 15,
     paddingTop: 40,
+    backgroundColor: "#f9fafb",
   },
-  header: {
-    alignItems: "center",
+  title: {
+    fontSize: 26,
+    fontWeight: "bold",
+    textAlign: "center",
+    color: "#2563eb",
+    fontFamily: "Poppins_700Bold",
     marginBottom: 20,
   },
-  profilePic: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    borderWidth: 2,
-    borderColor: "#1E90FF",
-    marginBottom: 8,
-  },
-  username: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+  subtitle: {
+    fontSize: 20,
+    marginTop: 20,
     marginBottom: 12,
+    fontWeight: "600",
+    color: "#374151",
+    fontFamily: "Poppins_600SemiBold",
   },
-  buttonsRow: {
+  pickerBox: {
     flexDirection: "row",
-    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 15,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  pickerLabel: {
+    color: "#374151",
+    fontSize: 16,
+    marginRight: 10,
+    fontFamily: "Poppins_500Medium",
+  },
+  picker: {
+    flex: 1,
+    color: "#111827",
+  },
+  grid: {
     gap: 10,
   },
-  addBtn: {
-    backgroundColor: "#000",
-    borderWidth: 1,
-    borderColor: "#1E90FF",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  addIcon: {
-    color: "#1E90FF",
-    fontSize: 28,
-    fontWeight: "bold",
-  },
-  saveBtn: {
-    backgroundColor: "#1E90FF",
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-    height: 50,
-  },
-  saveText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  gridItem: {
+  card: {
     flex: 1,
-    margin: 1,
-    position: "relative",
+    margin: 5,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  imageGrid: {
+  image: {
     width: "100%",
     aspectRatio: 1,
+    resizeMode: "cover",
   },
-  deleteBtn: {
-    position: "absolute",
-    top: 5,
-    right: 5,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    padding: 4,
-    borderRadius: 12,
+  preview: {
+    width: 260,
+    height: 260,
+    borderRadius: 18,
+    marginVertical: 20,
+    alignSelf: "center",
+    backgroundColor: "#f3f4f6",
+  },
+  fileSize: {
+    color: "#6b7280",
+    textAlign: "center",
+    fontFamily: "Poppins_400Regular",
   },
 });
